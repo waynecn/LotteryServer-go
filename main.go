@@ -11,8 +11,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
+
+	"io/ioutil"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/robfig/cron"
 )
 
 type Lotterys struct {
@@ -26,8 +30,45 @@ type History struct {
 	Lotterys []Lotterys `json:"lotterys"`
 }
 
+type KjggData struct {
+	State     int        `json:"state"`
+	Message   string     `json:"message"`
+	PageCount int        `json:"pageCount"`
+	CountNum  int        `json:"countNum"`
+	TFlag     int        `json:"Tflag"`
+	Result    []KjggItem `json:"result"`
+}
+
+type KjggItem struct {
+	Name        string            `json:"name"`
+	Code        string            `json:"code"`
+	DetailsLink string            `json:"detailsLink"`
+	VideoLink   string            `json:"videoLink"`
+	Date        string            `json:"date"`
+	Week        string            `json:"week"`
+	Red         string            `json:"red"`
+	Blue        string            `json:"blue"`
+	Sales       string            `json:"sales"`
+	PoolMoney   string            `json:"poolmoney"`
+	Content     string            `json:"content"`
+	AddMoney    string            `json:"addmoney"`
+	AddMoney2   string            `json:"addmoney2"`
+	Msg         string            `json:"msg"`
+	Z2Add       string            `json:"z2add"`
+	M2Add       string            `json:"m2add"`
+	PrizeGrades []PrizeGradesItem `json:"prizegrades"`
+}
+
+type PrizeGradesItem struct {
+	Type      int    `json:"type"`
+	TypeNum   string `json:"typenum"`
+	TypeMoney string `json:"typemoney"`
+}
+
 var port = flag.String("p", "5134", "指定端口")
 var db *sql.DB
+var kjggUrl = "http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=30"
+var kjggHistoryUrl = "http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=&issueStart=&issueEnd=&dayStart=2021-11-28&dayEnd=2022-02-08"
 
 func main() {
 	flag.Parse()
@@ -44,6 +85,15 @@ func main() {
 	//http request response
 	http.HandleFunc("/lottery", lotteryFunc)
 	http.HandleFunc("/lotteryHistory", lotteryHistoryFunc)
+
+	//准备启动定时器 定时查询开奖公告以及历史开奖公告
+	fmt.Println("ready start cron")
+	c := cron.New()
+	//c.AddFunc("* 31 21 * * ?", queryKjgg)	//每天21点31分
+	c.AddFunc("*/10 * * * * ?", queryKjgg) //每10秒
+	fmt.Println("start cron")
+	c.Start()
+	defer c.Stop()
 
 	fmt.Println("准备启动服务,端口:", *port)
 	err = http.ListenAndServe(":"+*port, nil)
@@ -248,4 +298,36 @@ func getRecord() []Lotterys {
 		results = append(results, item)
 	}
 	return results
+}
+
+func queryKjgg() {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	req, err := http.NewRequest("GET", kjggUrl, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Add("Referer", "http://www.cwl.gov.cn/ygkj/kjgg/")
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36")
+	req.Header.Add("X-Requested-With", "XMLHttpRequest")
+	req.Header.Add("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Add("Host", "www.cwl.gov.cn")
+	req.Header.Add("Cookie", "_ga=GA1.3.1940681231.1595247885; HMF_CI=a9decaf585b61e962b2d7563d6120430c8baebe64c03b6b525f7807d8433cad4e4; 21_vq=15")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	result, _ := ioutil.ReadAll(resp.Body)
+
+	var kjggData KjggData
+	err = json.Unmarshal(result, &kjggData)
+	if err != nil {
+		fmt.Println("结构化开奖公告结果发生错误:", err)
+		return
+	}
+	bts, err := json.Marshal(kjggData.Result[0])
+	fmt.Println("result 1:", string(bts))
 }
