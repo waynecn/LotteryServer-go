@@ -43,8 +43,12 @@
         <table id="results" border="1">
             <tr>
 				<th>序号</th>
-                <th>数组</th>
+                <th>号码</th>
                 <th>生成日期</th>
+				<th>期数</th>
+				<th>开奖日期</th>
+				<th>开奖结果</th>
+				<th>我是一等奖？</th>
             </tr>
 			<tr id="result"></tr>
         </table>
@@ -115,11 +119,18 @@
                         var object = JSON.parse(xmlhttp.responseText)
                         var tables = `<tr>
 							<th>序号</th>
-							<th>数组</th>
+							<th>号码</th>
 							<th>生成日期</th>
+							<th>期数</th>
+							<th>开奖日期</th>
+							<th>开奖结果</th>
+							<th>我是一等奖？</th>
 						</tr>`
                         for (i = 0; i < object.length; ++i) {
-                            tables += `<tr id="resultItem` + i + `"><td>` + (i + 1) + `</td><td>` + object[i].lottery + `</td><td>` + object[i].create_time.Time + `</td></tr>`
+                            tables += `<tr id="resultItem` + i + `"><td>` + (i + 1) + `</td><td>` + object[i].lottery + `</td><td>` + 
+							object[i].create_time_str + `</td><td>` + object[i].code.String + `</td><td>` + object[i].date.String + `</td><td>` +
+							 object[i].red.String + ' ' + object[i].blue.String +
+							 `</td><td>` + object[i].myPrizeGrade.Int32 +  `</td></tr>`
                         }
                         console.log(tables)
 						document.getElementById("results").innerHTML = ""
