@@ -106,6 +106,8 @@ func main() {
 	c.Start()
 	defer c.Stop()
 
+	go queryKjgg()
+
 	fmt.Println("准备启动服务,端口:", *port)
 	err = http.ListenAndServe(":"+*port, nil)
 	if err != nil {
