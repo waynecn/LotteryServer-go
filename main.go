@@ -63,6 +63,10 @@ type KjggItem struct {
 	Content     string            `json:"content"`
 	AddMoney    string            `json:"addmoney"`
 	AddMoney2   string            `json:"addmoney2"`
+	Zj1         string            `json:"zj1"` //add 20241118
+	Mj1         string            `json:"mj1"` //add 20241118
+	Zj6         string            `json:"zj6"` //add 20241118
+	Mj6         string            `json:"mj6"` //add 20241118
 	Msg         string            `json:"msg"`
 	Z2Add       string            `json:"z2add"`
 	M2Add       string            `json:"m2add"`
@@ -73,6 +77,16 @@ type PrizeGradesItem struct {
 	Type      int    `json:"type"`
 	TypeNum   string `json:"typenum"`
 	TypeMoney string `json:"typemoney"`
+}
+
+type LotteryDatas struct {
+	TotalCount  int `json:"totalcount"`
+	FirstCount  int `json:"firstcount"`
+	SecondCount int `json:"secondcount"`
+	ThirdCount  int `json:"thirdcount"`
+	ForthCount  int `json:"forthcount"`
+	FifthCount  int `json:"fifthcount"`
+	SixthCount  int `json:"sixthcount"`
 }
 
 var port = flag.String("p", "5134", "指定端口")
@@ -98,7 +112,9 @@ func main() {
 	//http request response
 	http.HandleFunc("/lottery", lotteryFunc)
 	http.HandleFunc("/lotteryHistory", lotteryHistoryFunc)
+	http.HandleFunc("/lotteryHistoryWithPage", lotteryHistoryFuncWithPage)
 	http.HandleFunc("/queryKjgg", queryKjggImpl)
+	http.HandleFunc("/loadData", loadDataImpl)
 
 	//准备启动定时器 定时查询开奖公告以及历史开奖公告
 	c := cron.New()
@@ -128,12 +144,9 @@ func lotteryFunc(w http.ResponseWriter, r *http.Request) {
 	var blueBall int64
 	//红区 1-33  6个号码
 	for cnt < 6 {
-		n, err := rand.Int(rand.Reader, big.NewInt(34))
+		n, err := rand.Int(rand.Reader, big.NewInt(33))
 		if err != nil {
 			fmt.Println("rand int error:", err)
-			continue
-		}
-		if n.Int64() == 0 {
 			continue
 		}
 		//排除重复数字
@@ -148,7 +161,7 @@ func lotteryFunc(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		cnt += 1
-		redBalls = append(redBalls, n.Int64())
+		redBalls = append(redBalls, n.Int64()+1)
 	}
 
 	qsort(redBalls, 0, len(redBalls)-1)
@@ -156,16 +169,13 @@ func lotteryFunc(w http.ResponseWriter, r *http.Request) {
 	//蓝区 1-16 1个号码
 	cnt = 0
 	for cnt < 1 {
-		n, err := rand.Int(rand.Reader, big.NewInt(17))
+		n, err := rand.Int(rand.Reader, big.NewInt(16))
 		if err != nil {
 			fmt.Println("rand int error:", err)
 			continue
 		}
-		if n.Int64() == 0 {
-			continue
-		}
 		cnt += 1
-		blueBall = n.Int64()
+		blueBall = n.Int64() + 1
 	}
 
 	var resultStr string
@@ -197,6 +207,27 @@ func lotteryHistoryFunc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	results := getRecord()
+
+	bts, err := json.Marshal(results)
+	if err != nil {
+		io.WriteString(w, "序列化查询结果失败")
+		return
+	}
+	io.WriteString(w, string(bts))
+}
+
+func lotteryHistoryFuncWithPage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		io.WriteString(w, "只允许POST请求")
+		return
+	}
+
+	r.ParseForm()
+	page := r.Form.Get("page")
+	pagecount := r.Form.Get("pagecount")
+	//fmt.Printf("page: %s pagecount: %s\n", page, pagecount)
+
+	results := getRecordWithPage(page, pagecount)
 
 	bts, err := json.Marshal(results)
 	if err != nil {
@@ -343,6 +374,70 @@ func getRecord() []Lotterys {
 	return results
 }
 
+func getRecordWithPage(page string, pagecount string) []Lotterys {
+	absDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("获取程序工作目录失败，错误描述：" + err.Error())
+		return nil
+	}
+	db, err := sql.Open("sqlite3", absDir+"/serverDB.db")
+	if err != nil {
+		fmt.Printf("sqlite open failed:[%v]", err.Error())
+		return nil
+	}
+	defer db.Close()
+
+	querySql := "select id, lottery, create_time,code, date, red, blue, my_prize_grade from lottery order by create_time desc;"
+	if len(page) > 0 && len(pagecount) > 0 {
+		pagenum, err := strconv.Atoi(page)
+		if err != nil {
+			fmt.Println("将page转为int错误:", err)
+			return nil
+		}
+		pagecountnum, err := strconv.Atoi(pagecount)
+		if err != nil {
+			fmt.Println("将pagecount转为int错误:", err)
+			return nil
+		}
+		if pagenum > 0 {
+			pagenum = pagenum - 1
+		}
+		offset := pagenum * pagecountnum
+		querySql = fmt.Sprintf("select id, lottery, create_time,code, date, red, blue, my_prize_grade from lottery order by create_time desc LIMIT %d OFFSET %d;", pagecountnum, offset)
+	}
+	//fmt.Println("querySql:", querySql)
+	stmt, err := db.Prepare(querySql)
+	if err != nil {
+		fmt.Println("Prepare error:", err)
+		return nil
+	}
+	rows, err := stmt.Query()
+	if err != nil {
+		fmt.Println("query error:", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []Lotterys
+	for rows.Next() {
+		var item Lotterys
+		err = rows.Scan(&item.Id, &item.Lottery, &item.CreateTime, &item.Code, &item.Date, &item.Red, &item.Blue, &item.MyPrizeGrade)
+		if err != nil {
+			fmt.Println("Scan error:", err)
+			continue
+		}
+
+		if item.Red.Valid {
+			item.Red.String = strings.Replace(item.Red.String, ",", " ", -1)
+		}
+		if item.CreateTime.Valid {
+			item.CreateTimeStr = item.CreateTime.Time.Format("2006-01-02 15:04:05")
+		}
+		results = append(results, item)
+	}
+	return results
+}
+
 func queryKjggImpl(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		io.WriteString(w, "只允许GET请求")
@@ -413,7 +508,7 @@ func queryKjgg() {
 	}
 }
 
-//根据日期查询居于两个开奖公告之间的号码记录 并用于后续更新开奖结果到数据库中
+// 根据日期查询居于两个开奖公告之间的号码记录 并用于后续更新开奖结果到数据库中
 func getLotteryRecord(startDate string, endDate string) []Lotterys {
 	absDir, err := os.Getwd()
 	if err != nil {
@@ -455,7 +550,7 @@ func getLotteryRecord(startDate string, endDate string) []Lotterys {
 	return results
 }
 
-//根据开奖结果计算号码是几等奖 返回：红球匹配数量 篮球匹配数量 几等奖
+// 根据开奖结果计算号码是几等奖 返回：红球匹配数量 篮球匹配数量 几等奖
 func calcMyPrizeGrade(myCode string, red string, blue string) (int, int, int) {
 	myNumbers := strings.Split(myCode, " ") //红蓝一起 最后一个是蓝球
 	redBalls := strings.Split(red, ",")     //开奖红球数组
@@ -565,4 +660,68 @@ func updateMyRecord(item Lotterys) {
 		return
 	}
 	fmt.Println("更新id:", item.Id, "成功")
+}
+
+func loadDataImpl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		io.WriteString(w, "只允许POST请求")
+		return
+	}
+
+	results := getDatas()
+
+	bts, err := json.Marshal(results)
+	//fmt.Printf("loadData:[%v]\n", string(bts))
+	if err != nil {
+		io.WriteString(w, "序列化查询结果失败")
+		return
+	}
+	io.WriteString(w, string(bts))
+}
+
+func getDatas() []LotteryDatas {
+	absDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("获取程序工作目录失败，错误描述：" + err.Error())
+		return nil
+	}
+	db, err := sql.Open("sqlite3", absDir+"/serverDB.db")
+	if err != nil {
+		fmt.Printf("sqlite open failed:[%v]", err.Error())
+		return nil
+	}
+	defer db.Close()
+
+	//querySql := "select count(1) as totalcount from lottery order by create_time desc;"
+	querySql := `select count(1) as totalcount, (select count(1) from lottery where my_prize_grade=1) as firstcount,
+		(select count(1) from lottery where my_prize_grade=2) as secondcount,
+		(select count(1) from lottery where my_prize_grade=3) as thirdcount,
+		(select count(1) from lottery where my_prize_grade=4) as forthcount,
+		(select count(1) from lottery where my_prize_grade=5) as fifthcount,
+		(select count(1) from lottery where my_prize_grade=6) as sixthcount 
+		 from lottery`
+	stmt, err := db.Prepare(querySql)
+	if err != nil {
+		fmt.Println("Prepare error:", err)
+		return nil
+	}
+	rows, err := stmt.Query()
+	if err != nil {
+		fmt.Println("query error:", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []LotteryDatas
+	for rows.Next() {
+		var item LotteryDatas
+		err = rows.Scan(&item.TotalCount, &item.FirstCount, &item.SecondCount, &item.ThirdCount, &item.ForthCount,
+			&item.FifthCount, &item.SixthCount)
+		if err != nil {
+			fmt.Println("Scan error:", err)
+			return nil
+		}
+		results = append(results, item)
+	}
+	return results
 }
