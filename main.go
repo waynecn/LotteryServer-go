@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -94,13 +95,17 @@ var db *sql.DB
 var kjggUrl = "http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=30"
 var kjggHistoryUrl = "http://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice?name=ssq&issueCount=&issueStart=&issueEnd=&dayStart=2021-11-28&dayEnd=2022-02-08"
 
+var redHistory [][]int
+var blueHistory []int
+
 func main() {
 	flag.Parse()
 
 	initLotterySqlite()
 	defer db.Close()
 
-	_, err := strconv.Atoi(*port)
+	var err error
+	_, err = strconv.Atoi(*port)
 	if err != nil {
 		*port = "5134"
 	}
@@ -110,11 +115,18 @@ func main() {
 	http.Handle("/", fs)
 
 	//http request response
-	http.HandleFunc("/lottery", lotteryFunc)
+	//http.HandleFunc("/lottery", lotteryFunc)
+	http.HandleFunc("/lottery", lotteryFuncUseMarkov)
 	http.HandleFunc("/lotteryHistory", lotteryHistoryFunc)
 	http.HandleFunc("/lotteryHistoryWithPage", lotteryHistoryFuncWithPage)
 	http.HandleFunc("/queryKjgg", queryKjggImpl)
 	http.HandleFunc("/loadData", loadDataImpl)
+
+	redHistory, blueHistory, err = readHistoryDataFromSql("serverDB.db")
+	if err != nil {
+		fmt.Printf("读取历史数据失败：%v\n", err)
+		return
+	}
 
 	//准备启动定时器 定时查询开奖公告以及历史开奖公告
 	c := cron.New()
@@ -188,6 +200,48 @@ func lotteryFunc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	blueStr := strconv.FormatInt(blueBall, 10)
+	if len(blueStr) < 2 {
+		blueStr = "0" + blueStr //单数补0
+	}
+	resultStr += blueStr
+
+	//将生成结果保存到sqlite数据库中
+	record(resultStr)
+
+	var bts = []byte(resultStr)
+	w.Write(bts)
+}
+
+func lotteryFuncUseMarkov(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		io.WriteString(w, "只允许POST请求")
+		return
+	}
+
+	// 2. 构建概率模型
+	redTransition := buildRedTransition(redHistory) // 红球转移概率表
+	blueProbs := buildBlueProbability(blueHistory)  // 蓝球频率表
+
+	// 3. 生成号码
+	redNumbers := generateRedNumbers(redTransition) // 生成红球
+	blueNumber := generateBlueNumber(blueProbs)     // 生成蓝球
+
+	// 4. 输出结果（红球按升序排列，符合双色球规则）
+	sort.Ints(redNumbers)
+	// fmt.Printf("🎫 双色球号码：\n")
+	// fmt.Printf("红球：%v\n", redNumbers)
+	// fmt.Printf("蓝球：%d\n", blueNumber)
+
+	var resultStr string
+	for index := range redNumbers {
+		redStr := strconv.FormatInt(int64(redNumbers[index]), 10)
+		if len(redStr) < 2 {
+			redStr = "0" + redStr //单数补0
+		}
+		resultStr += redStr + " "
+	}
+
+	blueStr := strconv.FormatInt(int64(blueNumber), 10)
 	if len(blueStr) < 2 {
 		blueStr = "0" + blueStr //单数补0
 	}
